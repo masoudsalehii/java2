@@ -16,98 +16,71 @@
  */
 package org.apache.commons.net.telnet;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.ServerSocket;
-import java.net.Socket;
 
 /**
- * Simple TCP server. Waits for connections on a TCP port in a separate thread.
+ * Simple stream responder. Waits for strings on an input stream and answers sending corresponfing strings on an output stream. The reader runs in a separate
+ * thread.
  */
-public class TelnetTestSimpleServer implements Runnable {
-    ServerSocket serverSocket;
-    Socket clientSocket;
-    Thread listener;
+public class TelnetTestResponder implements Runnable {
+    InputStream _is;
+    OutputStream _os;
+    String _inputs[], _outputs[];
+    long _timeout;
 
-    /*
-     * test of client-driven subnegotiation. <p>
+    /**
+     * Constructor. Starts a new thread for the reader.
+     * <p>
      *
-     * @param port - server port on which to listen.
-     *
-     * @throws IOException on error
+     * @param is      - InputStream on which to read.
+     * @param os      - OutputStream on which to answer.
+     * @param inputs  - Array of waited for Strings.
+     * @param outputs - Array of answers.
+     * @param timeout - milliseconds
      */
-    public TelnetTestSimpleServer(final int port) throws IOException {
-        serverSocket = new ServerSocket(port);
+    public TelnetTestResponder(final InputStream is, final OutputStream os, final String inputs[], final String outputs[], final long timeout) {
+        _is = is;
+        _os = os;
+        _timeout = timeout;
+        _inputs = inputs;
+        _outputs = outputs;
+        final Thread reader = new Thread(this);
 
-        listener = new Thread(this);
-
-        listener.start();
+        reader.start();
     }
 
-    public void disconnect() {
-        if (clientSocket == null) {
-            return;
-        }
-        synchronized (clientSocket) {
-            try {
-                clientSocket.notify();
-            } catch (final Exception e) {
-                System.err.println("Exception in notify, " + e.getMessage());
-            }
-        }
-    }
-
-    public InputStream getInputStream() throws IOException {
-        if (clientSocket != null) {
-            return clientSocket.getInputStream();
-        }
-        return null;
-    }
-
-    public OutputStream getOutputStream() throws IOException {
-        if (clientSocket != null) {
-            return clientSocket.getOutputStream();
-        }
-        return null;
-    }
-
+    /**
+     * Runs the responder
+     */
     @Override
     public void run() {
-        boolean bError = false;
-        while (!bError) {
-            try {
-                clientSocket = serverSocket.accept();
-                synchronized (clientSocket) {
-                    try {
-                        clientSocket.wait();
-                    } catch (final Exception e) {
-                        System.err.println("Exception in wait, " + e.getMessage());
+        boolean result = false;
+        final byte buffer[] = new byte[32];
+        final long starttime = System.currentTimeMillis();
+
+        try {
+            final StringBuilder readbytes = new StringBuilder();
+            while (!result && System.currentTimeMillis() - starttime < _timeout) {
+                if (_is.available() > 0) {
+                    final int ret_read = _is.read(buffer);
+                    readbytes.append(new String(buffer, 0, ret_read));
+
+                    for (int ii = 0; ii < _inputs.length; ii++) {
+                        if (readbytes.indexOf(_inputs[ii]) >= 0) {
+                            Thread.sleep(1000 * ii);
+                            _os.write(_outputs[ii].getBytes());
+                            result = true;
+                        }
                     }
-                    try {
-                        clientSocket.close();
-                    } catch (final Exception e) {
-                        System.err.println("Exception in close, " + e.getMessage());
-                    }
+                } else {
+                    Thread.sleep(500);
                 }
-            } catch (final IOException e) {
-                bError = true;
             }
-        }
 
-        try {
-            serverSocket.close();
         } catch (final Exception e) {
-            System.err.println("Exception in close, " + e.getMessage());
-        }
-    }
-
-    public void stop() {
-        listener.interrupt();
-        try {
-            serverSocket.close();
-        } catch (final Exception e) {
-            System.err.println("Exception in close, " + e.getMessage());
+            System.err.println("Error while waiting endstring. " + e.getMessage());
         }
     }
 }
+
